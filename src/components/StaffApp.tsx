@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { useDemo } from "@/lib/useDemo";
-import { advance, collect, remind, type Order } from "@/lib/store";
+import { advance, collect, remind, type Method, type Order } from "@/lib/store";
 import { LABEL, nextStatus, type Status } from "@/lib/status";
 import { rand, ago } from "@/lib/format";
 import { showPhone } from "@/lib/phone";
@@ -15,27 +15,41 @@ const ACTION: Record<string, string> = {
   drying: "Move to folding",
   folding: "Mark ready",
 };
+const METHODS: { id: Method; label: string }[] = [
+  { id: "cash", label: "Cash" },
+  { id: "card", label: "Card" },
+  { id: "eft", label: "EFT" },
+];
 const sameDay = (iso?: string) => !!iso && new Date(iso).toDateString() === new Date().toDateString();
 
 export default function StaffApp({ compact = false }: { compact?: boolean }) {
-  const { orders, now, ready } = useDemo();
+  const { orders, all, now, ready } = useDemo();
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [flash, setFlash] = useState("");
+  const [payFor, setPayFor] = useState("");
 
   const digits = q.replace(/\D/g, "");
   const match = (o: Order) => {
     const s = q.trim().toLowerCase();
     if (!s) return true;
-    return o.id.toLowerCase().includes(s) || o.name.toLowerCase().includes(s) || (digits.length > 0 && (o.phone.replace(/\D/g, "").includes(digits) || ("0" + o.phone.replace(/\D/g, "").slice(2)).includes(digits)));
+    const p = o.phone.replace(/\D/g, "");
+    return (
+      o.id.toLowerCase().includes(s) ||
+      o.name.toLowerCase().includes(s) ||
+      (digits.length > 0 && (p.includes(digits) || ("0" + p.slice(2)).includes(digits)))
+    );
   };
 
   const readyNow = orders.filter((o) => o.status === "ready");
   const waiting = readyNow.filter((o) => now - new Date(o.readyAt ?? o.created).getTime() > 86400000);
   const inProgress = orders.filter((o) => o.status !== "collected" && o.status !== "ready").length;
-  const takings = orders.filter((o) => o.paid && sameDay(o.collectedAt)).reduce((s, o) => s + o.cents, 0);
-  const todayCount = orders.filter((o) => sameDay(o.created)).length;
-  const collected = orders.filter((o) => o.status === "collected" && match(o));
+  const takings = all.filter((o) => o.paid && sameDay(o.collectedAt)).reduce((s, o) => s + o.cents, 0);
+  const todayCount = all.filter((o) => sameDay(o.created)).length;
+  const collectedToday = all
+    .filter((o) => o.status === "collected" && sameDay(o.collectedAt) && match(o))
+    .sort((a, b) => (b.collectedAt ?? "").localeCompare(a.collectedAt ?? ""))
+    .slice(0, 12);
 
   if (!ready) return <p className="muted">Loading…</p>;
 
@@ -79,8 +93,7 @@ export default function StaffApp({ compact = false }: { compact?: boolean }) {
                 {list.map((o) => {
                   const n = nextStatus(o.status);
                   const sv = services.find((s) => s.id === o.service);
-                  const waited = now - new Date(o.readyAt ?? o.created).getTime();
-                  const late = c === "ready" && waited > 86400000;
+                  const late = c === "ready" && now - new Date(o.readyAt ?? o.created).getTime() > 86400000;
                   return (
                     <article key={o.id} className={`ocard ${late ? "is-late" : ""}`}>
                       <header>
@@ -92,24 +105,32 @@ export default function StaffApp({ compact = false }: { compact?: boolean }) {
                         <span>{sv?.name}</span>
                         <b>{rand(o.cents)}</b>
                       </div>
-                      <small>
-                        {o.qty} {sv?.unit === "kg" ? "kg" : "items"} · {showPhone(o.phone)}
-                      </small>
+                      <small>{o.qty} {sv?.unit === "kg" ? "kg" : "items"} · {showPhone(o.phone)}</small>
                       {o.note && <small className="ocard__note">{o.note}</small>}
                       {late && <small className="ocard__late">Waiting {ago(o.readyAt ?? o.created, now).replace(" ago", "")}</small>}
                       {c !== "ready" && n && (
-                        <button className="btn btn--sm btn--block" onClick={() => advance(o.id)}>
-                          {ACTION[c]} →
-                        </button>
+                        <button className="btn btn--sm btn--block" onClick={() => advance(o.id)}>{ACTION[c]} →</button>
                       )}
                       {c === "ready" && (
                         <div className="ocard__act">
-                          <button className="btn btn--sm btn--block" onClick={() => collect(o.id)}>
-                            Collected and paid
-                          </button>
-                          <button className="link" onClick={() => remind(o.id)}>
-                            Send reminder
-                          </button>
+                          {payFor === o.id ? (
+                            <div className="pay">
+                              <small>How did they pay {rand(o.cents)}?</small>
+                              <div className="pay__row">
+                                {METHODS.map((m) => (
+                                  <button key={m.id} className="btn btn--sm" onClick={() => { collect(o.id, m.id); setPayFor(""); }}>
+                                    {m.label}
+                                  </button>
+                                ))}
+                              </div>
+                              <button className="link" onClick={() => setPayFor("")}>Cancel</button>
+                            </div>
+                          ) : (
+                            <>
+                              <button className="btn btn--sm btn--block" onClick={() => setPayFor(o.id)}>Collected and paid</button>
+                              <button className="link" onClick={() => remind(o.id)}>Send reminder</button>
+                            </>
+                          )}
                         </div>
                       )}
                     </article>
@@ -121,11 +142,11 @@ export default function StaffApp({ compact = false }: { compact?: boolean }) {
         })}
       </div>
 
-      {collected.length > 0 && (
+      {collectedToday.length > 0 && (
         <details className="done">
-          <summary>Collected ({collected.length})</summary>
-          {collected.map((o) => (
-            <p key={o.id}>{o.id} · {o.name} · {rand(o.cents)} · paid</p>
+          <summary>Collected today ({collectedToday.length})</summary>
+          {collectedToday.map((o) => (
+            <p key={o.id}>{o.id} · {o.name} · {rand(o.cents)} · {o.method ?? "cash"}</p>
           ))}
         </details>
       )}

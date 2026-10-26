@@ -2,10 +2,10 @@
 import Link from "next/link";
 import { useDemo } from "@/lib/useDemo";
 import { setShopName } from "@/lib/brand";
-import { resetDemo } from "@/lib/store";
+import { resetDemo, setWho, STAFF } from "@/lib/store";
 
 export default function DemoBar() {
-  const { shop } = useDemo();
+  const { shop, who } = useDemo();
   return (
     <>
       <div className="banner">Demo with sample data. No real messages are sent and nothing leaves this browser.</div>
@@ -14,9 +14,16 @@ export default function DemoBar() {
         <nav>
           <Link href="/demo">Presenter view</Link>
           <Link href="/staff">Staff app</Link>
+          <Link href="/owner">Owner view</Link>
           <Link href="/track">Customer page</Link>
         </nav>
         <div className="top__tools">
+          <label>
+            Working as
+            <select value={who} onChange={(e) => setWho(e.target.value)}>
+              {STAFF.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </label>
           <label>
             Shop name
             <input
