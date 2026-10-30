@@ -3,11 +3,15 @@ import { useMemo, useState } from "react";
 import { useDemo } from "@/lib/useDemo";
 import Overview from "@/components/owner/Overview";
 import Records from "@/components/owner/Records";
+import Customers from "@/components/owner/Customers";
+import Loyalty from "@/components/owner/Loyalty";
 import Money from "@/components/owner/Money";
 import AuditLog from "@/components/owner/AuditLog";
 
 const TABS = [
   ["overview", "Overview"],
+  ["customers", "Customers"],
+  ["loyalty", "Loyalty"],
   ["records", "Records"],
   ["money", "Money"],
   ["audit", "Audit log"],
@@ -32,6 +36,8 @@ export default function OwnerApp() {
         ))}
       </div>
       <div role="tabpanel" hidden={tab !== "overview"}><Overview all={d.all} live={d.orders} now={now} /></div>
+      <div role="tabpanel" hidden={tab !== "customers"}><Customers all={d.all} profiles={d.profiles} vouchers={d.vouchers} now={now} /></div>
+      <div role="tabpanel" hidden={tab !== "loyalty"}><Loyalty vouchers={d.vouchers} profiles={d.profiles} loyalty={d.loyalty} now={now} /></div>
       <div role="tabpanel" hidden={tab !== "records"}><Records all={d.all} now={now} /></div>
       <div role="tabpanel" hidden={tab !== "money"}><Money all={d.all} expenses={d.expenses} cashups={d.cashups} now={now} /></div>
       <div role="tabpanel" hidden={tab !== "audit"}><AuditLog audit={d.audit} now={now} /></div>

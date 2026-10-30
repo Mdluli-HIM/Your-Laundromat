@@ -9,6 +9,8 @@ const FEATURES = [
   ["Expenses and profit", "Record rent, wages, power and supplies, and see real profit by month."],
   ["Digital records", "Every order ever, searchable, with one-click export for the accountant."],
   ["Audit trail", "A record of who did what and when. It cannot be edited or deleted."],
+  ["Customer list", "Everyone who has ever visited, with last visit dates, so you can spot new customers and the ones who stopped coming."],
+  ["Loyalty vouchers", "Birthday and milestone vouchers, texted automatically, so regulars keep coming back."],
   ["Uncollected alerts", "See what has been waiting for days, and send a reminder in one tap."],
 ];
 

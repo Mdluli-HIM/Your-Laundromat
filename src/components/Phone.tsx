@@ -6,7 +6,7 @@ import { clock } from "@/lib/format";
 import { showPhone } from "@/lib/phone";
 
 export default function Phone() {
-  const { sms, orders } = useDemo();
+  const { sms, all } = useDemo();
   const [view, setView] = useState<"messages" | "track">("messages");
   const [ticket, setTicket] = useState("");
   const [pick, setPick] = useState("");
@@ -25,7 +25,7 @@ export default function Phone() {
   }, [sms]);
   const phone = lines.includes(pick) ? pick : (lines[0] ?? "");
   const mine = sms.filter((m) => m.to === phone);
-  const who = orders.find((o) => o.phone === phone)?.name ?? (phone ? showPhone(phone) : "");
+  const who = all.find((o) => o.phone === phone)?.name ?? (phone ? showPhone(phone) : "");
 
   useEffect(() => {
     if (view === "messages") box.current?.scrollTo({ top: box.current.scrollHeight, behavior: "smooth" });
@@ -40,7 +40,7 @@ export default function Phone() {
         ) : lines.length > 1 ? (
           <select value={phone} onChange={(e) => setPick(e.target.value)} aria-label="Customer">
             {lines.map((p) => (
-              <option key={p} value={p}>{orders.find((o) => o.phone === p)?.name ?? showPhone(p)}</option>
+              <option key={p} value={p}>{all.find((o) => o.phone === p)?.name ?? showPhone(p)}</option>
             ))}
           </select>
         ) : (

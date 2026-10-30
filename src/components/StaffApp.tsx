@@ -106,6 +106,7 @@ export default function StaffApp({ compact = false }: { compact?: boolean }) {
                         <b>{rand(o.cents)}</b>
                       </div>
                       <small>{o.qty} {sv?.unit === "kg" ? "kg" : "items"} · {showPhone(o.phone)}</small>
+                      {o.discount ? <small className="ocard__voucher">Voucher {o.voucher}: -{rand(o.discount)}</small> : null}
                       {o.note && <small className="ocard__note">{o.note}</small>}
                       {late && <small className="ocard__late">Waiting {ago(o.readyAt ?? o.created, now).replace(" ago", "")}</small>}
                       {c !== "ready" && n && (
@@ -118,7 +119,16 @@ export default function StaffApp({ compact = false }: { compact?: boolean }) {
                               <small>How did they pay {rand(o.cents)}?</small>
                               <div className="pay__row">
                                 {METHODS.map((m) => (
-                                  <button key={m.id} className="btn btn--sm" onClick={() => { collect(o.id, m.id); setPayFor(""); }}>
+                                  <button key={m.id} className="btn btn--sm" onClick={() => {
+                                    const won = collect(o.id, m.id);
+                                    setPayFor("");
+                                    if (won.length) {
+                                      setFlash(
+                                        `${o.name} earned ${won.length > 1 ? won.length + " vouchers" : "a voucher"} (${won.map((v) => v.code).join(", ")}). ${won[0].sms ? "SMS sent." : "No SMS consent, tell the customer."}`
+                                      );
+                                      window.setTimeout(() => setFlash(""), 7000);
+                                    }
+                                  }}>
                                     {m.label}
                                   </button>
                                 ))}

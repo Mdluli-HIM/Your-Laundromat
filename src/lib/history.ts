@@ -1,4 +1,4 @@
-import { priceOf, type Audit, type Cashup, type Expense, type Method, type Order } from "@/lib/store";
+import { priceOf, DEFAULT_LOYALTY, type Audit, type Cashup, type Expense, type Method, type Order, type Profile, type Voucher } from "@/lib/store";
 import { dkey } from "@/lib/reports";
 
 /* All of this is made up for the demo. */
@@ -12,6 +12,10 @@ const NAMES = [
 ];
 const ALPHA = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const DAYS = 400;
+const DAY = 86400000;
+const NOSMS = new Set([11, 27]); /* two customers did not agree to SMS */
+const pad = (n: number) => String(n).padStart(2, "0");
+const phoneOf = (c: number) => "+2782000" + (1000 + c);
 
 function hash(s: string) {
   let h = 2166136261;
@@ -31,8 +35,141 @@ function rng(seed: number) {
   };
 }
 
-export type History = { orders: Order[]; audit: Audit[]; expenses: Expense[]; cashups: Cashup[] };
-export const EMPTY: History = { orders: [], audit: [], expenses: [], cashups: [] };
+/* when each customer started and stopped coming, in days ago. This is what makes some customers
+   new, some regulars, some at risk, and some lapsed. */
+const START: number[] = [];
+const END: number[] = [];
+NAMES.forEach((_, c) => {
+  const r = rng(hash("win|" + c));
+  if (c < 14) {
+    START[c] = 300 + Math.floor(r() * 100); /* regulars */
+    END[c] = 0;
+  } else if (c < 22) {
+    START[c] = 220 + Math.floor(r() * 170); /* lapsed */
+    END[c] = 70 + Math.floor(r() * 150);
+  } else if (c < 24) {
+    START[c] = 300; /* at risk */
+    END[c] = c === 22 ? 36 : 50;
+  } else if (c < 30) {
+    START[c] = 200 + Math.floor(r() * 190); /* occasional */
+    END[c] = Math.floor(r() * 20);
+  } else {
+    START[c] = 2 + Math.floor(r() * 40); /* new */
+    END[c] = 0;
+  }
+});
+const WEIGHT = (c: number) => (c < 14 ? 6 : c < 24 ? 3 : c < 30 ? 1 : 3);
+
+function pick(r: () => number, d: number): number {
+  let total = 0;
+  for (let c = 0; c < NAMES.length; c++) if (d <= START[c] && d >= END[c]) total += WEIGHT(c);
+  if (!total) return 0;
+  let x = r() * total;
+  for (let c = 0; c < NAMES.length; c++) {
+    if (d <= START[c] && d >= END[c]) {
+      x -= WEIGHT(c);
+      if (x <= 0) return c;
+    }
+  }
+  return 0;
+}
+
+const md = (d: Date) => `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+function buildProfiles(today: Date): Record<string, Profile> {
+  const out: Record<string, Profile> = {};
+  NAMES.forEach((name, c) => {
+    const r = rng(hash("bd|" + c));
+    let birthday: string | undefined;
+    if (c === 3) birthday = md(new Date(today.getFullYear(), today.getMonth(), today.getDate() + 3));
+    else if (c === 5) birthday = md(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 2));
+    else if (c % 3 !== 0) birthday = `${pad(1 + Math.floor(r() * 12))}-${pad(1 + Math.floor(r() * 28))}`;
+    out[phoneOf(c)] = { name, birthday, consent: !NOSMS.has(c) };
+  });
+  return out;
+}
+
+/* past vouchers, so the loyalty screens have a story. Upcoming birthdays are issued live. */
+function buildVouchers(orders: Order[], profiles: Record<string, Profile>, now: Date): Voucher[] {
+  const L = DEFAULT_LOYALTY;
+  const nowMs = now.getTime();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const out: Voucher[] = [];
+  const used = new Set<string>();
+
+  const first: Record<string, number> = {};
+  for (const o of orders) {
+    const t = new Date(o.created).getTime();
+    if (!first[o.phone] || t < first[o.phone]) first[o.phone] = t;
+  }
+
+  const code = (seed: string) => {
+    let n = 0;
+    let c = "";
+    do {
+      const h = hash(seed + "|" + n++);
+      c = "LV-" + Array.from({ length: 4 }, (_, i) => ALPHA[(h >>> (i * 5)) % ALPHA.length]).join("");
+    } while (used.has(c));
+    used.add(c);
+    return c;
+  };
+  const add = (phone: string, kind: Voucher["kind"], value: number, reason: Voucher["reason"], tag: string, issued: Date) => {
+    if (issued.getTime() < (first[phone] ?? Infinity)) return;
+    const p = profiles[phone];
+    const expires = new Date(issued.getTime() + L.validDays * DAY);
+    const r = rng(hash("v|" + phone + tag));
+    let redeemedAt: string | undefined;
+    if (r() < (expires.getTime() < nowMs ? 0.6 : 0.35)) {
+      const at = new Date(issued.getTime() + (3 + r() * 40) * DAY);
+      if (at.getTime() < Math.min(expires.getTime(), nowMs)) redeemedAt = at.toISOString();
+    }
+    out.push({
+      code: code(phone + tag), phone, name: p?.name ?? "", kind, value, reason, tag,
+      issued: issued.toISOString(), expires: expires.toISOString(), redeemedAt, sms: p?.consent !== false,
+    });
+  };
+
+  for (const [phone, p] of Object.entries(profiles)) {
+    if (!p.birthday) continue;
+    const [m, d] = p.birthday.split("-").map(Number);
+    for (const yr of [today.getFullYear() - 1, today.getFullYear()]) {
+      const bday = new Date(yr, m - 1, d);
+      if (bday.getTime() >= today.getTime()) continue;
+      const issued = new Date(bday.getTime() - L.birthday.daysBefore * DAY);
+      if (issued.getTime() < nowMs - 380 * DAY) continue;
+      add(phone, "percent", L.birthday.pct, "birthday", `birthday-${yr}`, issued);
+    }
+  }
+
+  const by: Record<string, Order[]> = {};
+  for (const o of orders) (by[o.phone] ??= []).push(o);
+  for (const [phone, list] of Object.entries(by)) {
+    list.sort((a, b) => (a.collectedAt ?? "").localeCompare(b.collectedAt ?? ""));
+    let spent = 0;
+    list.forEach((o, i) => {
+      const n = i + 1;
+      const before = spent;
+      spent += o.cents;
+      const at = new Date(o.collectedAt ?? o.created);
+      if (at.getTime() < nowMs - 120 * DAY) return;
+      if (n % L.visits.every === 0) add(phone, "rand", L.visits.cents, "visits", `visits-${n}`, at);
+      const a = Math.floor(spent / L.spend.every);
+      const b = Math.floor(before / L.spend.every);
+      if (a > b) add(phone, "rand", L.spend.cents, "spend", `spend-${a}`, at);
+    });
+  }
+  return out.sort((a, b) => b.issued.localeCompare(a.issued));
+}
+
+export type History = {
+  orders: Order[];
+  audit: Audit[];
+  expenses: Expense[];
+  cashups: Cashup[];
+  profiles: Record<string, Profile>;
+  vouchers: Voucher[];
+};
+export const EMPTY: History = { orders: [], audit: [], expenses: [], cashups: [], profiles: {}, vouchers: [] };
 
 export function buildHistory(now: Date): History {
   const nowMs = now.getTime();
@@ -64,7 +201,7 @@ export function buildHistory(now: Date): History {
       if (col.getDay() === 0) col = new Date(col.getTime() + 86400000);
       const bad = col.getHours() < 7 || col.getHours() >= (col.getDay() === 6 ? 14 : 17);
       if (bad) col = new Date(col.getFullYear(), col.getMonth(), col.getDate(), 8 + Math.floor(r() * 5), Math.floor(r() * 60));
-      const c = Math.floor(Math.pow(r(), 1.8) * NAMES.length);
+      const c = pick(r, d);
       const mr = r();
       const method: Method = mr < 0.45 ? "cash" : mr < 0.85 ? "card" : "eft";
       const by = r() < 0.5 ? "Thandi" : "Sipho";
@@ -81,14 +218,14 @@ export function buildHistory(now: Date): History {
       const o: Order = {
         id,
         name: NAMES[c],
-        phone: "+2782000" + (1000 + c),
+        phone: phoneOf(c),
         service,
         qty,
         cents: priceOf(service, qty),
         paid: true,
         status: "collected",
         note: "",
-        consent: true,
+        consent: !NOSMS.has(c),
         created: created.toISOString(),
         readyAt: new Date(created.getTime() + (col.getTime() - created.getTime()) * 0.7).toISOString(),
         collectedAt: col.toISOString(),
@@ -138,5 +275,7 @@ export function buildHistory(now: Date): History {
     cashups.push({ date: key, expected, counted: expected + diff, by: "Thandi", note: "", at: new Date(day.getFullYear(), day.getMonth(), day.getDate(), 17, 30).toISOString() });
   }
 
-  return { orders, audit, expenses, cashups };
+  const profiles = buildProfiles(today);
+  const vouchers = buildVouchers(orders, profiles, now);
+  return { orders, audit, expenses, cashups, profiles, vouchers };
 }
